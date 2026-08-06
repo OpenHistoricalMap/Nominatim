@@ -21,7 +21,7 @@ import datetime as dt
 
 import sqlalchemy as sa
 
-from .typing import SaSelect, SaRow
+from .typing import SaSelect, SaRow, SaColumn
 from .sql.sqlalchemy_types import Geometry
 from .types import Point, Bbox, LookupDetails, EntranceDetails
 from .connection import SearchConnection
@@ -567,6 +567,39 @@ def _setup_address_details(result: BaseResultT) -> None:
             fromarea=False, isaddress=True, rank_address=25, distance=0))
 
 
+# OHM: stand-ins for open-ended dates. No start_date means "always existed",
+# no end_date means "still exists". Both sit far outside any real OHM date.
+OHM_DATE_MIN = -1e6
+OHM_DATE_MAX = 1e6
+
+
+def _ohm_decimal_date(datestr: SaColumn, startend: str, default: float) -> SaColumn:
+    """ Turn an OHM date string into a decimal date.
+
+        Uses OpenHistoricalMap/DateFunctions-plpgsql, the same functions the
+        tiler calls, so both read dates the same way. Partial dates are padded
+        to the start or end of the period they name; unreadable ones fall back
+        to the default.
+    """
+    return sa.func.coalesce(
+        sa.func.public.isodatetodecimaldate(
+            sa.func.public.pad_date(sa.func.nullif(datestr, ''), startend), False),
+        default)
+
+
+def _ohm_dates_overlap(extratags: SaColumn,
+                       other_start: SaColumn, other_end: SaColumn) -> SaColumn:
+    """ True when the place in `extratags` existed during the period between
+        `other_start` and `other_end`.
+
+        Places without dates overlap everything, so undated data stays true.
+    """
+    place_start = _ohm_decimal_date(extratags['start_date'], 'start', OHM_DATE_MIN)
+    place_end = _ohm_decimal_date(extratags['end_date'], 'end', OHM_DATE_MAX)
+
+    return sa.and_(place_start <= other_end, other_start <= place_end)
+
+
 async def complete_address_details(conn: SearchConnection, results: List[BaseResultT]) -> None:
     """ Retrieve information about places that make up the address of the result.
     """
@@ -578,7 +611,9 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
     lookup_ids = [{'pid': r.place_id,
                    'lid': _get_address_lookup_id(r),
                    'names': list(r.address.values()) if r.address else [],
-                   'c': ('SRID=4326;' + r.centroid.to_wkt()) if r.centroid else ''}
+                   'c': ('SRID=4326;' + r.centroid.to_wkt()) if r.centroid else '',
+                   'sd': (r.extratags or {}).get('start_date'),
+                   'ed': (r.extratags or {}).get('end_date')}
                   for r in results if r.place_id]
 
     if not lookup_ids:
@@ -589,6 +624,10 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
 
     t = conn.t.placex
     taddr = conn.t.addressline
+
+    # OHM: dates of the searched place
+    result_start = _ohm_decimal_date(ltab.c.value['sd'].as_string(), 'start', OHM_DATE_MIN)
+    result_end = _ohm_decimal_date(ltab.c.value['ed'].as_string(), 'end', OHM_DATE_MAX)
 
     sql = sa.select(ltab.c.value['pid'].as_integer().label('src_place_id'),
                     t.c.place_id, t.c.osm_type, t.c.osm_id, t.c.name,
@@ -603,6 +642,7 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             .order_by('src_place_id')\
             .order_by(sa.column('rank_address').desc())\
             .order_by((taddr.c.place_id == ltab.c.value['pid'].as_integer()).desc())\
+            .order_by(_ohm_dates_overlap(t.c.extratags, result_start, result_end).desc())\
             .order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
                               (taddr.c.isaddress, 0),
                               (sa.and_(taddr.c.fromarea,
