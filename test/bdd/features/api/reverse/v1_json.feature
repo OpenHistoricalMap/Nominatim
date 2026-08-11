@@ -55,7 +55,7 @@ Feature: Json output for Reverse API
         And the result has attributes place_id
         And the result contains
           | licence!fm |
-          | Data © OpenStreetMap contributors, ODbL 1.0. https?://osm.org/copyright |
+          | Map data courtesy of the OpenHistoricalMap project, in the public domain unless otherwise noted. https://www.openhistoricalmap.org/copyright |
         And the result contains
           | osm_type | osm_id     |
           | node     | 6522627624 |

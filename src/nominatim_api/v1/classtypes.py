@@ -61,7 +61,9 @@ def bbox_from_result(result: Union[ReverseResult, SearchResult]) -> Bbox:
     return result.bbox
 
 
-OSM_ATTRIBUTION = 'Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright'
+OSM_ATTRIBUTION = ('Map data courtesy of the OpenHistoricalMap project, in the public '
+                   'domain unless otherwise noted. '
+                   'https://www.openhistoricalmap.org/copyright')
 
 
 OSM_TYPE_NAME = {

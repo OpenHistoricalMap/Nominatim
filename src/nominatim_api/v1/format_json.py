@@ -255,7 +255,7 @@ def format_base_geocodejson(results: Union[ReverseResults, SearchResults],
        .key('geocoding').start_object()\
                         .keyval('version', '0.1.0')\
                         .keyval('attribution', cl.OSM_ATTRIBUTION)\
-                        .keyval('licence', 'ODbL')\
+                        .keyval('licence', 'CC0-1.0')\
                         .keyval_not_none('query', options.get('query'))\
                         .end_object().next()\
        .key('features').start_array()

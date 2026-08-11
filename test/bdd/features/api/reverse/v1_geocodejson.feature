@@ -27,7 +27,7 @@ Feature: Geocodejson for Reverse API
         And the result is valid geocodejson with 1 result
         And the result metadata contains
           | version | licence | attribution!fm |
-          | 0.1.0   | ODbL    | Data © OpenStreetMap contributors, ODbL 1.0. https?://osm.org/copyright |
+          | 0.1.0   | CC0-1.0 | Map data courtesy of the OpenHistoricalMap project, in the public domain unless otherwise noted. https://www.openhistoricalmap.org/copyright |
         And all results have <attributes> country,postcode,county,city,district,street,housenumber,admin
         And all results contain
           | param               | value |

@@ -27,7 +27,7 @@ Feature: Geojson for Reverse API
         And the result is valid geojson with 1 result
         And the result metadata contains
           | licence!fm |
-          | Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright |
+          | Map data courtesy of the OpenHistoricalMap project, in the public domain unless otherwise noted. https://www.openhistoricalmap.org/copyright |
         And all results have attributes place_id, importance
         And all results have <attributes> address
         And all results contain
