@@ -635,6 +635,8 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
                     t.c.admin_level, taddr.c.fromarea,
                     sa.case((t.c.type == 'postal_code', 5),
                             else_=t.c.rank_address).label('rank_address'),
+                    _ohm_dates_overlap(t.c.extratags, result_start, result_end)
+                    .label('ohm_overlaps'),
                     taddr.c.distance, t.c.country_code, t.c.postcode)\
             .join(taddr, sa.or_(taddr.c.place_id == ltab.c.value['pid'].as_integer(),
                                 taddr.c.place_id == ltab.c.value['lid'].as_integer()))\
@@ -642,7 +644,7 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             .order_by('src_place_id')\
             .order_by(sa.column('rank_address').desc())\
             .order_by((taddr.c.place_id == ltab.c.value['pid'].as_integer()).desc())\
-            .order_by(_ohm_dates_overlap(t.c.extratags, result_start, result_end).desc())\
+            .order_by(sa.column('ohm_overlaps').desc())\
             .order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
                               (taddr.c.isaddress, 0),
                               (sa.and_(taddr.c.fromarea,
@@ -662,7 +664,10 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             assert current_result is not None
             current_rank_address = -1
 
-        location_isaddress = row.rank_address != current_rank_address
+        # OHM: skip the rank when its best row did not exist at the same time
+        # as the result. Better a gap than a parent that was already gone.
+        location_isaddress = row.rank_address != current_rank_address \
+            and row.ohm_overlaps
 
         if current_result.country_code is None and row.country_code:
             current_result.country_code = row.country_code
