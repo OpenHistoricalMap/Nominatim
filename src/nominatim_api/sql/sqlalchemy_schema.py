@@ -56,7 +56,9 @@ class SearchTables:
             sa.Column('country_code', sa.String(2)),
             sa.Column('housenumber', sa.Text),
             sa.Column('postcode', sa.Text),
-            sa.Column('centroid', Geometry, nullable=False))
+            sa.Column('centroid', Geometry, nullable=False),
+            sa.Column('start_decdate', sa.Float),
+            sa.Column('end_decdate', sa.Float))
 
         self.addressline = sa.Table(
             'place_addressline', meta,

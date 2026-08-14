@@ -587,17 +587,17 @@ def _ohm_decimal_date(datestr: SaColumn, startend: str, default: float) -> SaCol
         default)
 
 
-def _ohm_dates_overlap(extratags: SaColumn,
+def _ohm_dates_overlap(start_decdate: SaColumn, end_decdate: SaColumn,
                        other_start: SaColumn, other_end: SaColumn) -> SaColumn:
-    """ True when the place in `extratags` existed during the period between
+    """ True when the place existed during the period between
         `other_start` and `other_end`.
 
-        Places without dates overlap everything, so undated data stays true.
+        Reads the decimal dates precomputed in placex, so no date parsing
+        happens per row. NULL dates overlap everything, so undated data
+        stays true.
     """
-    place_start = _ohm_decimal_date(extratags['start_date'], 'start', OHM_DATE_MIN)
-    place_end = _ohm_decimal_date(extratags['end_date'], 'end', OHM_DATE_MAX)
-
-    return sa.and_(place_start <= other_end, other_start <= place_end)
+    return sa.and_(sa.func.coalesce(start_decdate, OHM_DATE_MIN) <= other_end,
+                   other_start <= sa.func.coalesce(end_decdate, OHM_DATE_MAX))
 
 
 async def complete_address_details(conn: SearchConnection, results: List[BaseResultT]) -> None:
@@ -635,7 +635,8 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
                     t.c.admin_level, taddr.c.fromarea,
                     sa.case((t.c.type == 'postal_code', 5),
                             else_=t.c.rank_address).label('rank_address'),
-                    _ohm_dates_overlap(t.c.extratags, result_start, result_end)
+                    _ohm_dates_overlap(t.c.start_decdate, t.c.end_decdate,
+                                       result_start, result_end)
                     .label('ohm_overlaps'),
                     taddr.c.distance, t.c.country_code, t.c.postcode)\
             .join(taddr, sa.or_(taddr.c.place_id == ltab.c.value['pid'].as_integer(),

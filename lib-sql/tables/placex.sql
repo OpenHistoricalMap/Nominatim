@@ -25,7 +25,9 @@ CREATE TABLE placex (
   country_code varchar(2),
   housenumber TEXT,
   postcode TEXT,
-  centroid GEOMETRY(Geometry, 4326) NOT NULL
+  centroid GEOMETRY(Geometry, 4326) NOT NULL,
+  start_decdate DOUBLE PRECISION,
+  end_decdate DOUBLE PRECISION
   ) {{db.tablespace.search_data}};
 
 CREATE UNIQUE INDEX idx_place_id ON placex USING BTREE (place_id) {{db.tablespace.search_index}};
