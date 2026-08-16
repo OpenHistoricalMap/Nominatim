@@ -140,7 +140,8 @@ end
 module.RELATION_TYPES = {
     multipolygon = module.relation_as_multipolygon,
     boundary = module.relation_as_multipolygon,
-    waterway = module.relation_as_multiline
+    waterway = module.relation_as_multiline,
+    multilinestring = module.relation_as_multiline
 }
 
 --------- Built-in place transformation functions --------------------------
