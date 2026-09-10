@@ -587,17 +587,16 @@ def _ohm_decimal_date(datestr: SaColumn, startend: str, default: float) -> SaCol
         default)
 
 
-def _ohm_dates_overlap(start_decdate: SaColumn, end_decdate: SaColumn,
-                       other_start: SaColumn, other_end: SaColumn) -> SaColumn:
-    """ True when the place existed during the period between
-        `other_start` and `other_end`.
-
-        Reads the decimal dates precomputed in placex, so no date parsing
-        happens per row. NULL dates overlap everything, so undated data
-        stays true.
+def _ohm_overlap_span(start_decdate: SaColumn, end_decdate: SaColumn,
+                      other_start: SaColumn, other_end: SaColumn) -> SaColumn:
+    """ Years the place existed within `other_start`..`other_end`.
+        Negative when the periods do not overlap, zero when they only touch.
+        Undated places count as always existing.
     """
-    return sa.and_(sa.func.coalesce(start_decdate, OHM_DATE_MIN) <= other_end,
-                   other_start <= sa.func.coalesce(end_decdate, OHM_DATE_MAX))
+    return sa.func.least(sa.func.coalesce(end_decdate, OHM_DATE_MAX), other_end,
+                         type_=sa.Float) \
+        - sa.func.greatest(sa.func.coalesce(start_decdate, OHM_DATE_MIN), other_start,
+                           type_=sa.Float)
 
 
 async def complete_address_details(conn: SearchConnection, results: List[BaseResultT]) -> None:
@@ -628,6 +627,8 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
     # OHM: dates of the searched place
     result_start = _ohm_decimal_date(ltab.c.value['sd'].as_string(), 'start', OHM_DATE_MIN)
     result_end = _ohm_decimal_date(ltab.c.value['ed'].as_string(), 'end', OHM_DATE_MAX)
+    overlap_span = _ohm_overlap_span(t.c.start_decdate, t.c.end_decdate,
+                                     result_start, result_end)
 
     sql = sa.select(ltab.c.value['pid'].as_integer().label('src_place_id'),
                     t.c.place_id, t.c.osm_type, t.c.osm_id, t.c.name,
@@ -635,9 +636,7 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
                     t.c.admin_level, taddr.c.fromarea,
                     sa.case((t.c.type == 'postal_code', 5),
                             else_=t.c.rank_address).label('rank_address'),
-                    _ohm_dates_overlap(t.c.start_decdate, t.c.end_decdate,
-                                       result_start, result_end)
-                    .label('ohm_overlaps'),
+                    overlap_span.label('ohm_overlap_span'),
                     taddr.c.distance, t.c.country_code, t.c.postcode)\
             .join(taddr, sa.or_(taddr.c.place_id == ltab.c.value['pid'].as_integer(),
                                 taddr.c.place_id == ltab.c.value['lid'].as_integer()))\
@@ -645,7 +644,7 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             .order_by('src_place_id')\
             .order_by(sa.column('rank_address').desc())\
             .order_by((taddr.c.place_id == ltab.c.value['pid'].as_integer()).desc())\
-            .order_by(sa.column('ohm_overlaps').desc())\
+            .order_by((overlap_span >= 0).desc())\
             .order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
                               (taddr.c.isaddress, 0),
                               (sa.and_(taddr.c.fromarea,
@@ -654,6 +653,7 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
                                                ltab.c.value['c'].as_string()))), 1),
                               else_=-1).desc())\
             .order_by(taddr.c.fromarea.desc())\
+            .order_by(sa.column('ohm_overlap_span').desc())\
             .order_by(taddr.c.distance.desc())\
             .order_by(t.c.rank_search.desc())
 
@@ -665,10 +665,11 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             assert current_result is not None
             current_rank_address = -1
 
-        # OHM: skip the rank when its best row did not exist at the same time
-        # as the result. Better a gap than a parent that was already gone.
+        # OHM: rows are sorted so the first row of a rank is the parent with
+        # the longest overlap in time. Skip the rank when even that one never
+        # overlapped the result.
         location_isaddress = row.rank_address != current_rank_address \
-            and row.ohm_overlaps
+            and row.ohm_overlap_span >= 0
 
         if current_result.country_code is None and row.country_code:
             current_result.country_code = row.country_code
