@@ -1137,8 +1137,14 @@ BEGIN
     END IF;
 
     -- merge in extra tags
+    -- OHM: leave the dates out. The linked place is the settlement, which
+    -- almost always predates the boundary, and several boundaries of the same
+    -- chronology share one place point. A boundary only uses its own dates.
     NEW.extratags := hstore('linked_' || location.class, location.type)
-                     || coalesce(location.extratags, ''::hstore)
+                     || coalesce(location.extratags - ARRAY['start_date', 'end_date',
+                                                            'start_date:edtf',
+                                                            'end_date:edtf'],
+                                 ''::hstore)
                      || coalesce(NEW.extratags, ''::hstore);
 
     -- mark the linked place (excludes from search results)
