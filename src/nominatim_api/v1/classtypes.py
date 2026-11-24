@@ -11,6 +11,7 @@ These tables have been copied verbatim from the old PHP code. For future
 version a more flexible formatting is required.
 """
 from typing import Tuple, Optional, Mapping, Union
+import os
 
 from ..results import ReverseResult, SearchResult
 from ..types import Bbox
@@ -61,7 +62,10 @@ def bbox_from_result(result: Union[ReverseResult, SearchResult]) -> Bbox:
     return result.bbox
 
 
-OSM_ATTRIBUTION = 'Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright'
+OSM_ATTRIBUTION = os.environ.get(
+    'NOMINATIM_RESULT_ATTRIBUTION',
+    'Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright')
+OSM_LICENCE = os.environ.get('NOMINATIM_RESULT_LICENCE', 'ODbL')
 
 
 OSM_TYPE_NAME = {
