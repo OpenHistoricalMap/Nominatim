@@ -409,6 +409,7 @@ DECLARE
 
   addr_item RECORD;
   addr_place RECORD;
+  parent_place RECORD;
   parent_address_place_ids BIGINT[];
 BEGIN
   nameaddress_vector := '{}'::INTEGER[];
@@ -417,6 +418,24 @@ BEGIN
     INTO parent_name_vector, parent_address_vector
     FROM search_name s
     WHERE s.place_id = parent_place_id;
+
+  IF parent_address_vector is null
+     AND (token_get_name_search_tokens(token_info) is not null
+          OR token_get_housenumber_search_tokens(token_info) is not null)
+  THEN
+    parent_name_vector := '{}'::INTEGER[];
+    parent_address_vector := '{}'::INTEGER[];
+
+    FOR parent_place IN
+      SELECT s.name_vector
+        FROM place_addressline pa
+        JOIN search_name s ON s.place_id = pa.address_place_id
+       WHERE pa.place_id = parent_place_id
+    LOOP
+      parent_address_vector := array_merge(parent_address_vector,
+                                           parent_place.name_vector);
+    END LOOP;
+  END IF;
 
   FOR addr_item IN
     SELECT ranks.*, key,
@@ -659,11 +678,9 @@ CREATE OR REPLACE FUNCTION placex_insert()
   AS $$
 DECLARE
   postcode TEXT;
-  result INT;
   is_area BOOLEAN;
   country_code VARCHAR(2);
   diameter FLOAT;
-  classtable TEXT;
 BEGIN
   {% if debug %}RAISE WARNING '% % % %',NEW.osm_type,NEW.osm_id,NEW.class,NEW.type;{% endif %}
 
@@ -682,16 +699,11 @@ BEGIN
   ELSE
     is_area := ST_GeometryType(NEW.geometry) IN ('ST_Polygon','ST_MultiPolygon');
 
-    IF NOT is_rankable_place(NEW.osm_type, NEW.categories, NEW.admin_level,
-                             NEW.name, NEW.extratags, is_area)
-    THEN
-        RETURN NULL;
-    END IF;
-
     SELECT * INTO NEW.rank_search, NEW.rank_address
       FROM compute_place_rank(NEW.country_code,
                               CASE WHEN is_area THEN 'A' ELSE NEW.osm_type END,
-                              NEW.categories, NEW.admin_level,
+                              NEW.categories,
+                              NEW.admin_level,
                               (NEW.extratags->'capital') = 'yes',
                               NEW.address->'postcode');
     -- a country code make no sense below rank 4 (country)
@@ -713,22 +725,6 @@ BEGIN
 
   {% if debug %}RAISE WARNING 'placex_insert:END: % % % %',NEW.osm_type,NEW.osm_id,NEW.class,NEW.type;{% endif %}
 
-{% if not disable_diff_updates %}
-  -- The following is not needed until doing diff updates, and slows the main index process down
-
-   -- add to tables for special search
-  classtable := 'place_classtype_' || NEW.class || '_' || NEW.type;
-  SELECT count(*) INTO result
-    FROM pg_tables
-    WHERE classtable NOT SIMILAR TO '%\W%'
-          AND tablename = classtable and schemaname = current_schema();
-  IF result > 0 THEN
-    EXECUTE 'INSERT INTO ' || classtable::regclass || ' (place_id, centroid) VALUES ($1,$2)' 
-    USING NEW.place_id, NEW.centroid;
-  END IF;
-
-{% endif %} -- not disable_diff_updates
-
   RETURN NEW;
 
 END;
@@ -740,6 +736,7 @@ CREATE OR REPLACE FUNCTION placex_update()
   AS $$
 DECLARE
   i INTEGER;
+  is_area BOOLEAN;
   location RECORD;
 {% if db.middle_db_format == '1' %}
   relation_members TEXT[];
@@ -785,7 +782,7 @@ BEGIN
   -- Lazy backfill: derive categories from class/type when empty.
   -- Matches Lua sanitize_label(): hyphens -> underscores, invalid chars -> 'yes'.
   -- Invalid class falls back to 'place' (gives osm.place.yes) per PG < 16 compat.
-  IF array_length(NEW.categories, 1) IS NULL THEN
+  IF array_length(NEW.categories, 1) IS NULL AND NOT (NEW.class = 'place' AND NEW.type = 'house') THEN
     NEW.categories := ARRAY[(
       'osm.'
       || CASE WHEN NEW.class !~ '^[A-Za-z0-9_-]+$'
@@ -858,21 +855,20 @@ BEGIN
   END IF;
   {% if debug %}RAISE WARNING 'Country updated: "%"', NEW.country_code;{% endif %}
 
-
+  is_area := ST_GeometryType(NEW.geometry) IN ('ST_Polygon','ST_MultiPolygon');
   -- recompute the ranks, they might change when linking changes
   SELECT * INTO NEW.rank_search, NEW.rank_address
     FROM compute_place_rank(NEW.country_code,
-                            CASE WHEN ST_GeometryType(NEW.geometry)
-                                        IN ('ST_Polygon','ST_MultiPolygon')
-                            THEN 'A' ELSE NEW.osm_type END,
-                            NEW.categories, NEW.admin_level,
+                            CASE WHEN is_area THEN 'A' ELSE NEW.osm_type END,
+                            NEW.categories,
+                            NEW.admin_level,
                             (NEW.extratags->'capital') = 'yes',
                             NEW.address->'postcode');
   -- Short-cut out for linked places. Note that this must happen after the
   -- address rank has been recomputed. The linking might nullify a shift in
   -- address rank.
   IF NEW.linked_place_id is not null THEN
-    NEW.token_info := null;
+    NEW.token_info := token_strip_info(NEW.token_info);
     {% if debug %}RAISE WARNING 'place already linked to %', OLD.linked_place_id;{% endif %}
     RETURN NEW;
   END IF;
@@ -1304,8 +1300,6 @@ CREATE OR REPLACE FUNCTION placex_delete()
   AS $$
 DECLARE
   b BOOLEAN;
-  result INT;
-  classtable TEXT;
 BEGIN
   -- RAISE WARNING 'placex_delete % %',OLD.osm_type,OLD.osm_id;
 
@@ -1360,17 +1354,6 @@ BEGIN
   DELETE FROM place_addressline where place_id = OLD.place_id;
 
   {% if debug %}RAISE WARNING 'placex_delete:11 % %',OLD.osm_type,OLD.osm_id;{% endif %}
-
-  -- remove from tables for special search
-  classtable := 'place_classtype_' || OLD.class || '_' || OLD.type;
-  SELECT count(*) INTO result
-    FROM pg_tables
-    WHERE classtable NOT SIMILAR TO '%\W%'
-          AND tablename = classtable and schemaname = current_schema();
-
-  IF result > 0 THEN
-    EXECUTE 'DELETE FROM ' || classtable::regclass || ' WHERE place_id = $1' USING OLD.place_id;
-  END IF;
 
   {% if debug %}RAISE WARNING 'placex_delete:12 % %',OLD.osm_type,OLD.osm_id;{% endif %}
   RETURN OLD;

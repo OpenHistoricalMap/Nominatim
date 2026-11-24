@@ -7,50 +7,6 @@
 
 -- Functions related to search and address ranks
 
--- Check if a place is rankable at all.
--- These really should be dropped at the lua level eventually.
-CREATE OR REPLACE FUNCTION is_rankable_place(osm_type TEXT, categories ltree[],
-                                             admin_level SMALLINT, name HSTORE,
-                                             extratags HSTORE, is_area BOOLEAN)
-  RETURNS BOOLEAN
-  AS $$
-DECLARE
-  cat ltree;
-  cat_class TEXT;
-BEGIN
-  IF categories IS NULL THEN
-    RETURN TRUE;
-  END IF;
-  FOREACH cat IN ARRAY categories LOOP
-    -- Only check osm.* categories
-    IF cat ~ 'osm.*'::lquery THEN
-      cat_class := split_part(cat::text, '.', 2);
-
-      -- Check unnamed highway area
-      IF cat_class = 'highway' AND is_area AND name IS NULL
-         AND extratags ? 'area' AND extratags->'area' = 'yes'
-      THEN
-        CONTINUE;
-      END IF;
-
-      -- Check non-area boundary
-      IF cat_class = 'boundary' THEN
-        IF NOT is_area
-           OR (admin_level <= 4 AND osm_type = 'W')
-        THEN
-          CONTINUE;
-        END IF;
-      END IF;
-
-      RETURN TRUE;
-    END IF;
-  END LOOP;
-
-  RETURN FALSE;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
-
 
 -- Return an approximate search radius according to the search rank.
 CREATE OR REPLACE FUNCTION reverse_place_diameter(rank_search SMALLINT)
@@ -97,9 +53,9 @@ BEGIN
   ELSIF rank_search < 24 THEN
     RETURN 0.02;
   ELSIF rank_search < 26 THEN
-    RETURN 0.002;
+    RETURN 0.005;
   ELSIF rank_search < 28 THEN
-    RETURN 0.001;
+    RETURN 0.002;
   END IF;
 
   RETURN 0;

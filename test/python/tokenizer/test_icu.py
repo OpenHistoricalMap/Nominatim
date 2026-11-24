@@ -13,7 +13,7 @@ import itertools
 import pytest
 
 from nominatim_db.tokenizer import icu_tokenizer
-import nominatim_db.tokenizer.icu_rule_loader
+from nominatim_db.tokenizer.icu_tokenizer import rule_loader as icu_rule_loader
 from nominatim_db.db import properties
 from nominatim_db.data.place_info import PlaceInfo
 from nominatim_db.data.place_name import PlaceName
@@ -78,7 +78,7 @@ def analyzer(tokenizer_factory, test_config, monkeypatch,
                                              'analyzer': 'housenumbers'})
         (test_config.project_dir / 'icu_tokenizer.yaml').write_text(
             yaml.dump(cfgstr), encoding='utf-8')
-        tok.loader = nominatim_db.tokenizer.icu_rule_loader.ICURuleLoader(test_config)
+        tok.loader = icu_rule_loader.ICURuleLoader(test_config)
 
         return tok.name_analyzer()
 
@@ -148,7 +148,7 @@ def test_init_new(tokenizer_factory, test_config, db_prop):
     tok = tokenizer_factory()
     tok.init_new_db(test_config)
 
-    prop = db_prop(nominatim_db.tokenizer.icu_rule_loader.DBCFG_IMPORT_NORM_RULES)
+    prop = db_prop(icu_rule_loader.DBCFG_IMPORT_NORM_RULES)
 
     assert prop.startswith(':: lower ();')
 
@@ -526,9 +526,8 @@ class TestPlaceAddress:
         assert 'place' not in info
 
     def test_process_place_address_terms(self):
-        info = self.process_address(country='de', city='Zwickau', state='Sachsen',
-                                    suburb='Zwickau', street='Hauptstr',
-                                    full='right behind the church')
+        info = self.process_address(city='Zwickau', state='Sachsen',
+                                    suburb='Zwickau', street='Hauptstr')
 
         city = self.name_token_set('ZWICKAU', '#ZWICKAU')
         state = self.name_token_set('SACHSEN', '#SACHSEN')
@@ -545,8 +544,7 @@ class TestPlaceAddress:
         assert result == {'city': self.name_token_set('Bruxelles', '#Bruxelles')}
 
     def test_process_place_address_terms_empty(self):
-        info = self.process_address(country='de', city=' ', street='Hauptstr',
-                                    full='right behind the church')
+        info = self.process_address(city=' ', street='Hauptstr')
 
         assert 'addr' not in info
 

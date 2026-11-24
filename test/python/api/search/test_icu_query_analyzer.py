@@ -70,7 +70,8 @@ async def test_single_phrase_with_unknown_terms(conn):
 
     assert query.num_token_slots() == 2
     assert query.nodes[0].partial.token == 1
-    assert query.nodes[1].partial is None
+    assert query.nodes[1].partial.token == -1
+    assert query.nodes[1].partial.penalty == 10.0
 
 
 @pytest.mark.asyncio
@@ -128,7 +129,7 @@ async def test_penalty_postcodes_and_housenumbers(conn, term, order):
 async def test_category_words_only_at_beginning(conn):
     ana = await tok.create_query_analyzer(conn)
 
-    await add_word(conn, 1, 'foo', 'S', 'FOO', {'op': 'in'})
+    await add_word(conn, 1, 'foo', 'S', 'FOO', {'op': 'in', 'class': 'amenity', 'type': 'bar'})
     await add_word(conn, 2, 'bar', 'w', 'BAR')
 
     query = await ana.analyze_query(make_phrase('foo BAR foo'))
@@ -143,7 +144,7 @@ async def test_category_words_only_at_beginning(conn):
 async def test_freestanding_qualifier_words_become_category(conn):
     ana = await tok.create_query_analyzer(conn)
 
-    await add_word(conn, 1, 'foo', 'S', 'FOO', {'op': '-'})
+    await add_word(conn, 1, 'foo', 'S', 'FOO', {'op': '-', 'class': 'amenity', 'type': 'bar'})
 
     query = await ana.analyze_query(make_phrase('foo'))
 
@@ -156,7 +157,7 @@ async def test_freestanding_qualifier_words_become_category(conn):
 async def test_qualifier_words(conn):
     ana = await tok.create_query_analyzer(conn)
 
-    await add_word(conn, 1, 'foo', 'S', None, {'op': '-'})
+    await add_word(conn, 1, 'foo', 'S', None, {'op': '-', 'class': 'amenity', 'type': 'bar'})
     await add_word(conn, 2, 'bar', 'w', None)
 
     query = await ana.analyze_query(make_phrase('foo BAR foo BAR foo'))

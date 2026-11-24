@@ -60,11 +60,12 @@ class OsmID:
     """ The OSM ID of the object.
     """
     osm_class: Optional[str] = None
-    """ The same OSM object may appear multiple times in the database under
-        different categories. The optional class parameter allows to distinguish
-        the different categories and corresponds to the key part of the category.
-        If there are multiple objects in the database and `osm_class` is
-        left out, then one of the objects is returned at random.
+    """ Optional restriction on the main tag of the object. It corresponds to
+        the key part of that tag. When it is given, then it must be equal to
+        the class of the object or the lookup returns nothing. Databases that
+        were migrated from a version before 5.4 may still hold one entry per
+        main tag. There the parameter selects between them and, when it is
+        left out, one of the entries is returned at random.
     """
 
     def __str__(self) -> str:
@@ -517,6 +518,35 @@ def format_categories(categories: List[Tuple[str, str]]) -> List[Tuple[str, str]
     return categories
 
 
+CATEGORY_RE = re.compile(r'[A-Za-z0-9_]{1,255}(\.[A-Za-z0-9_]{1,255})+')
+
+
+def format_category_filters(filters: Any) -> list[list[str]]:
+    """ Parse category filters into a list of groups of categories.
+
+        Each entry of 'filters' is a comma-separated list of categories which
+        together form one group. A category must consist of at least two
+        dot-separated labels made up of letters, digits and underscores.
+    """
+    if isinstance(filters, str):
+        filters = [filters]
+
+    result = []
+    for group in filters:
+        if not isinstance(group, str):
+            raise UsageError("Category filters must be strings.")
+        categories = []
+        for category in group.split(','):
+            category = category.strip()
+            if not CATEGORY_RE.fullmatch(category):
+                raise UsageError(f"Invalid category '{category}'. A category must consist"
+                                 " of at least two labels separated by dots.")
+            categories.append(category)
+        result.append(categories)
+
+    return result
+
+
 TParam = TypeVar('TParam', bound='LookupDetails')
 
 
@@ -657,8 +687,28 @@ class SearchDetails(LookupDetails):
 
     categories: List[Tuple[str, str]] = dataclasses.field(default_factory=list,
                                                           metadata={'transform': format_categories})
-    """ Restrict search to places with one of the given class/type categories.
-        An empty list (the default) will disable this filter.
+    """ Restrict search to places with one of the given main tags, given as
+        class/type pairs. An empty list (the default) will disable this filter.
+
+        Deprecated. Use `include` instead, which restricts on the same
+        information in its hierarchical form.
+    """
+
+    include: list[list[str]] = \
+        dataclasses.field(default_factory=list,
+                          metadata={'transform': format_category_filters})
+    """ Restrict search to places matching the given categories. A place must
+        match at least one category of every group and matches a category when
+        it is assigned the category itself or one of its descendants. An empty
+        list (the default) will disable this filter.
+    """
+
+    exclude: list[list[str]] = \
+        dataclasses.field(default_factory=list,
+                          metadata={'transform': format_category_filters})
+    """ Drop places matching the given categories from the results. A place is
+        dropped when it matches all categories of any of the groups. An empty
+        list (the default) will disable this filter.
     """
 
     viewbox_x2: Optional[Bbox] = None

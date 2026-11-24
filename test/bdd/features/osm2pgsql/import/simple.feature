@@ -45,15 +45,22 @@ Feature: Import of simple objects by osm2pgsql
             """
             local flex = require('import-<style>')
             """
+        And the grid
+            | 1 | 2 |
+            | 4 | 3 |
         When loading osm data
             """
-            n1 Tboundary=administrative,place=city,name=Foo,wikipedia:de=Foo
-            n2 Tplace=hamlet,wikidata=Q1234321,name=Bar
+            n1
+            n2
+            n3
+            n4
+            n12 Tplace=hamlet,wikidata=Q1234321,name=Bar
+            w1 Tboundary=administrative,place=city,name=Foo,wikipedia:de=Foo,admin_level=10 Nn1,n2,n3,n4,n1
             """
         Then place contains exactly
            | object | class    | extratags!dict         | categories!set                                  |
-           | N1     | boundary | 'wikipedia:de': 'Foo'  | 'osm.boundary.administrative', 'osm.place.city' |
-           | N2     | place    | 'wikidata': 'Q1234321' | 'osm.place.hamlet'                              |
+           | W1     | boundary | 'wikipedia:de': 'Foo'  | 'osm.boundary.administrative', 'osm.place.city' |
+           | N12    | place    | 'wikidata': 'Q1234321' | 'osm.place.hamlet'                              |
 
         Examples:
            | style   |
@@ -61,4 +68,25 @@ Feature: Import of simple objects by osm2pgsql
            | street  |
            | address |
            | full    |
-           | extratags |
+
+    Scenario: Tags used by Nominatim internally are always imported with extratags
+        Given the lua style file
+            """
+            local flex = require('import-extratags')
+            """
+        And the grid
+            | 1 | 2 |
+            | 4 | 3 |
+        When loading osm data
+            """
+            n1
+            n2
+            n3
+            n4
+            n12 Tplace=hamlet,wikidata=Q1234321,name=Bar
+            w1 Tboundary=administrative,place=city,name=Foo,wikipedia:de=Foo,admin_level=10 Nn1,n2,n3,n4,n1
+            """
+        Then place contains exactly
+           | object | class    | extratags!dict                         | categories!set                                  |
+           | W1     | boundary | 'place': 'city', 'wikipedia:de': 'Foo' | 'osm.boundary.administrative', 'osm.place.city' |
+           | N12    | place    | 'wikidata': 'Q1234321'                 | 'osm.place.hamlet'                              |

@@ -173,7 +173,7 @@ Feature: Tag evaluation
             """
         Then place contains exactly
             | object | class | type  | address!dict        | categories         |
-            | N1     | place | house | 'housenumber': '345'| osm.place.house    |
+            | N1     | place | house | 'housenumber': '345'| -                  |
 
         When updating osm data
             """
@@ -203,11 +203,11 @@ Feature: Tag evaluation
             """
         Then place contains exactly
             | object | class | type  | address!dict        | categories           |
-            | N1     | place | house | 'housenumber': '345'| osm.place.house      |
+            | N1     | place | house | 'housenumber': '345'| -                    |
         When indexing
         Then placex contains exactly
             | object | class | type  | address!dict        | categories           |
-            | N1     | place | house | 'housenumber': '345'| osm.place.house      |
+            | N1     | place | house | 'housenumber': '345'| -                    |
 
 
     Scenario: Main tags with name key, adding key name
@@ -365,30 +365,6 @@ Feature: Tag evaluation
           | object | class   | type        | categories                                     |
           | W1     | highway | residential | osm.highway.residential, osm.tourism.hotel     |
 
-
-    Scenario: Replay on administrative boundary
-        When loading osm data
-            """
-            n10 x34.0 y-4.23
-            n11 x34.1 y-4.23
-            n12 x34.2 y-4.13
-            w10 Tboundary=administrative,waterway=river,name=Border,admin_level=2 Nn12,n11,n10
-            """
-        Then place contains exactly
-            | object | class    | type           | admin_level | name!dict        | categories!set                                          |
-            | W10    | boundary | administrative | 2           | 'name': 'Border' | 'osm.boundary.administrative', 'osm.waterway.river'     |
-
-        When updating osm data
-            """
-            w10 Tboundary=administrative,waterway=river,name=Border,admin_level=2 Nn12,n11,n10
-            """
-        Then place contains exactly
-            | object | class    | type           | admin_level | name!dict        | categories!set                                          |
-            | W10    | boundary | administrative | 2           | 'name': 'Border' | 'osm.boundary.administrative', 'osm.waterway.river'     |
-        When indexing
-        Then placex contains exactly
-            | object | class    | type           | admin_level | name!dict        | categories!set                                          |
-            | W10    | boundary | administrative | 2           | 'name': 'Border' | 'osm.boundary.administrative', 'osm.waterway.river'     |
 
     Scenario: Change admin_level on administrative boundary
         Given the grid

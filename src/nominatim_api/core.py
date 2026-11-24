@@ -708,9 +708,20 @@ class NominatimAPI:
               near_radius (Optional[float]): Restrict results to results within
                 the given distance in degrees of `near` point. Ignored, when
                 `near` is not set.
-              categories (list[tuple]): Restrict search to places of the given
-                categories. The category is the main OSM tag assigned to each
-                place. An empty list (the default) disables this filter.
+              categories (list[tuple]): Restrict search to places with one of
+                the given main tags, given as class/type pairs. An empty list
+                (the default) disables this filter. Deprecated, use `include`
+                instead.
+              include (list[list[str]]): Restrict search to places matching the
+                given hierarchical categories, e.g. `osm.amenity.restaurant`.
+                A place must match at least one category of every group and
+                matches a category when it is assigned the category itself or
+                one of its descendants. An empty list (the default) disables
+                this filter.
+              exclude (list[list[str]]): Drop places matching the given
+                hierarchical categories from the results. A place is dropped
+                when it matches all categories of any of the groups. An empty
+                list (the default) disables this filter.
               geometry_output (enum): Add the full geometry of the place to the result.
                 Multiple formats may be selected. Note that geometries can become
                 quite large. (Default: none)
@@ -826,9 +837,20 @@ class NominatimAPI:
               near_radius (Optional[float]): Restrict results to results within
                 the given distance in degrees of `near` point. Ignored, when
                 `near` is not set.
-              categories (list[tuple]): Restrict search to places of the given
-                categories. The category is the main OSM tag assigned to each
-                place. An empty list (the default) disables this filter.
+              categories (list[tuple]): Restrict search to places with one of
+                the given main tags, given as class/type pairs. An empty list
+                (the default) disables this filter. Deprecated, use `include`
+                instead.
+              include (list[list[str]]): Restrict search to places matching the
+                given hierarchical categories, e.g. `osm.amenity.restaurant`.
+                A place must match at least one category of every group and
+                matches a category when it is assigned the category itself or
+                one of its descendants. An empty list (the default) disables
+                this filter.
+              exclude (list[list[str]]): Drop places matching the given
+                hierarchical categories from the results. A place is dropped
+                when it matches all categories of any of the groups. An empty
+                list (the default) disables this filter.
               geometry_output (enum): Add the full geometry of the place to the result.
                 Multiple formats may be selected. Note that geometries can become
                 quite large. (Default: none)
@@ -907,9 +929,8 @@ class NominatimAPI:
             viewbox or near parameters.
 
             Parameters:
-              categories: Restrict search to places of the given
-                categories. The category is the main OSM tag assigned to each
-                place.
+              categories: Restrict search to places with one of the given
+                main tags, given as class/type pairs.
               near_query: Optional free-text query to define the are to
                 restrict search to.
 

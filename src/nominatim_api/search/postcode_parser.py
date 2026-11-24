@@ -7,7 +7,7 @@
 """
 Handling of arbitrary postcode tokens in tokenized query string.
 """
-from typing import Tuple, Set, Dict, List
+from typing import Tuple, Set, Any, Optional
 import re
 from collections import defaultdict
 
@@ -15,6 +15,28 @@ import yaml
 
 from ..config import Configuration
 from . import query as qmod
+
+
+class _UniquePattern:
+    """ Helper class for creating the postcode search pattern.
+    """
+    def __init__(self) -> None:
+        self.patterns: dict[str, dict[Optional[str], list[str]]] = {}
+
+    def add(self, cc: str, pcdata: dict[str, Any]) -> None:
+        pat = pcdata['pattern'].replace('d', '[0-9]').replace('l', '[A-Z]')
+        out = pcdata.get('output')
+        if pat not in self.patterns:
+            self.patterns[pat] = defaultdict(list)
+        self.patterns[pat][out].append(cc.upper())
+
+    def global_pattern(self) -> re.Pattern[str]:
+        return re.compile('(?:(?P<cc>[A-Z][A-Z])(?P<space>[ -]?))?(?P<pc>(?:(?:'
+                          f"{')|(?:'.join(self.patterns)}))[:, >].*)")
+
+    def local_patterns(self) -> list[tuple[re.Pattern[str], list[tuple[Optional[str], list[str]]]]]:
+        return [(re.compile(f"{pat}[:, >]"), list(info.items()))
+                for pat, info in self.patterns.items()]
 
 
 class PostcodeParser:
@@ -31,21 +53,17 @@ class PostcodeParser:
         cdata = yaml.safe_load(config.find_config_file('country_settings.yaml')
                                      .read_text(encoding='utf-8'))
 
-        unique_patterns: Dict[str, Dict[str, List[str]]] = {}
+        unique_patterns = _UniquePattern()
         for cc, data in cdata.items():
-            if data.get('postcode'):
-                pat = data['postcode']['pattern'].replace('d', '[0-9]').replace('l', '[A-Z]')
-                out = data['postcode'].get('output')
-                if pat not in unique_patterns:
-                    unique_patterns[pat] = defaultdict(list)
-                unique_patterns[pat][out].append(cc.upper())
+            if (pcdata := data.get('postcode')):
+                if isinstance(pcdata, dict):
+                    unique_patterns.add(cc, pcdata)
+                elif isinstance(pcdata, list):
+                    for pcitem in pcdata:
+                        unique_patterns.add(cc, pcitem)
 
-        self.global_pattern = re.compile(
-                '(?:(?P<cc>[A-Z][A-Z])(?P<space>[ -]?))?(?P<pc>(?:(?:'
-                + ')|(?:'.join(unique_patterns) + '))[:, >].*)')
-
-        self.local_patterns = [(re.compile(f"{pat}[:, >]"), list(info.items()))
-                               for pat, info in unique_patterns.items()]
+        self.global_pattern = unique_patterns.global_pattern()
+        self.local_patterns = unique_patterns.local_patterns()
 
     def parse(self, query: qmod.QueryStruct) -> Set[Tuple[int, int, str]]:
         """ Parse postcodes in the given list of query tokens taking into
@@ -67,28 +85,31 @@ class PostcodeParser:
 
             subnodes = nodes[start:end]
             if ptype == qmod.PHRASE_POSTCODE:
-                self._match_word(''.join(f"{n.btype}{n.term_normalized.upper()}"
-                                         for n in subnodes)[1:] + nodes[end].btype,
-                                 start, True, outcodes)
+                self._match_word(''.join((n.btype if n.btype in ' -' else '')
+                                         + n.partial.lookup_word.upper()
+                                         for n in subnodes) + qmod.BREAK_PHRASE,
+                                 [start, end], True, outcodes)
             elif ptype == qmod.PHRASE_ANY:
                 subnodes.reverse()
-                word = nodes[end].btype
+                word = qmod.BREAK_PHRASE
+                space_pos = [end]
                 substart = end - 1
                 for n in subnodes:
-                    if n.btype == '`' or word == '`':
-                        word = n.btype
-                    else:
-                        word = n.term_normalized.upper() + word
-                        if n.btype in '<,: ':
-                            self._match_word(word, substart, False, outcodes)
+                    word = n.partial.lookup_word.upper() + word
+                    if n.btype in '<,: ':
+                        space_pos = [substart] + space_pos
+                        self._match_word(word, space_pos, False, outcodes)
                         word = n.btype + word
+                    elif n.btype == qmod.BREAK_PART:
+                        space_pos = [substart] + space_pos
+                        word = qmod.BREAK_PART + word
                     substart -= 1
 
             start = end
 
         return outcodes
 
-    def _match_word(self, word: str, pos: int, fullmatch: bool,
+    def _match_word(self, word: str, space_pos: list[int], fullmatch: bool,
                     outcodes: Set[Tuple[int, int, str]]) -> None:
         # Use global pattern to check for presence of any postcode.
         m = self.global_pattern.fullmatch(word)
@@ -101,7 +122,12 @@ class PostcodeParser:
             for pattern, info in self.local_patterns:
                 lm = pattern.fullmatch(pc_word) if fullmatch else pattern.match(pc_word)
                 if lm:
-                    trange = (pos, pos + cc_spaces + sum(c in ' ,-:>' for c in lm.group(0)))
+                    if fullmatch:
+                        trange = (space_pos[0], space_pos[-1])
+                    else:
+                        trange = (space_pos[0],
+                                  space_pos[cc_spaces
+                                            + sum(c in ' ,-:>' for c in lm.group(0))])
                     for out, out_ccs in info:
                         if cc is None or cc in out_ccs:
                             if out:
