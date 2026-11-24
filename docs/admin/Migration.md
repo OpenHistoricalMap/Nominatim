@@ -17,6 +17,45 @@ breaking changes. **Please read them before running the migration.**
     and migrate to 4.3 first. Then you can migrate to the current
     version. It is strongly recommended to do a reimport instead.
 
+## 5.3.0 -> 5.4.0
+
+### Places are classified by categories now
+
+Places have a new `categories` column on the `place` and `placex` tables. It
+holds the main tags of a place as hierarchical labels of the form
+`osm.<class>.<type>`, see
+[Database layout](../develop/Database-Layout.md#import-tables). The migration
+adds the column and fills it in `placex` from the `class` and `type` of the
+existing rows.
+
+The backfill only covers what the category search needs: the places that make
+up an address above street level and the POI categories that have a special
+phrase. A migrated database also keeps its old layout of one row per main tag.
+Reimport if you want the new `include` and `exclude` filters of the
+[search API](../api/Search.md#result-restriction) to find a place under all of
+its main tags.
+
+### The place_classtype tables are not used anymore
+
+Category search now runs against the `categories` column of `placex`, so the
+per-category `place_classtype_*` tables are not created or updated anymore.
+The migration leaves the existing tables in place because the old frontend
+code still queries them until you have restarted it with the new version.
+
+Once all your frontends run the new version, you can drop the tables to free
+the disk space. On a planet database that is a couple of hundred tables and
+several GB. To generate the necessary SQL, run:
+
+```sql
+SELECT format('DROP TABLE IF EXISTS %I;', tablename)
+  FROM pg_tables
+  WHERE schemaname = 'public' AND tablename LIKE 'place\_classtype\_%';
+```
+
+The `--min` option of `nominatim special-phrases` only restricted which of
+those tables were created. It has no effect anymore and is deprecated. It
+will be removed in a future version.
+
 ## 5.2.0 -> 5.3.0
 
 #### Expensive table migrations

@@ -13,7 +13,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.compiler import compiles
 
-from ..typing import SaColumn
+from ..typing import SaColumn, SaFromClause
 
 
 class PlacexGeometryReverseLookuppolygon(sa.sql.functions.GenericFunction[Any]):
@@ -220,3 +220,43 @@ def sqlite_regexp_nocase(element: RegexpWord, compiler: 'sa.Compiled', **kw: Any
     arg1, arg2 = list(element.clauses)
     return "regexp('\\b(' || %s  || ')\\b', %s)"\
         % (compiler.process(arg1, **kw), compiler.process(arg2, **kw))
+
+
+class CategoryMatch(sa.sql.functions.GenericFunction[Any]):
+    """ Match a placex row against a category or any of its descendants.
+
+        On PostgreSQL this queries the ltree 'categories' column using the
+        GiST index (``categories <@ '<category>'``). On SQLite, where the
+        categories are stored as a comma-separated text, the same is
+        emulated with a substring search.
+    """
+    name = 'CategoryMatch'
+    inherit_cache = True
+
+    def __init__(self, table: SaFromClause, category: str) -> None:
+        # The needles for the SQLite variant are precomputed here because
+        # SQLAlchemy 1.4 binds a parameter only once per statement, even
+        # when it is rendered more than once.
+        super().__init__(table.c.categories, sa.literal(category),
+                         sa.literal(f',{category},'), sa.literal(f',{category}.'))
+
+
+@compiles(CategoryMatch)
+def _default_category_match(element: CategoryMatch,
+                            compiler: 'sa.Compiled', **kw: Any) -> str:
+    cats, category, _, _ = list(element.clauses)
+    return "(%s <@ (%s)::ltree)" % (compiler.process(cats, **kw),
+                                    compiler.process(category, **kw))
+
+
+@compiles(CategoryMatch, 'sqlite')
+def _sqlite_category_match(element: CategoryMatch,
+                           compiler: 'sa.Compiled', **kw: Any) -> str:
+    cats, _, exact, descendants = list(element.clauses)
+    # The categories are padded with the separator on both sides, so that
+    # the needles match only on a full label boundary: ',<category>,' is an
+    # exact hit, ',<category>.' one of its descendants.
+    haystack = "(',' || %s || ',')" % compiler.process(cats, **kw)
+    return "(instr(%s, %s) > 0 OR instr(%s, %s) > 0)" \
+           % (haystack, compiler.process(exact, **kw),
+              haystack, compiler.process(descendants, **kw))

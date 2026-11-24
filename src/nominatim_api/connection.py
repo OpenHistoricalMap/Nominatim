@@ -2,21 +2,20 @@
 #
 # This file is part of Nominatim. (https://nominatim.org)
 #
-# Copyright (C) 2024 by the Nominatim developer community.
+# Copyright (C) 2026 by the Nominatim developer community.
 # For a full list of authors see the git log.
 """
 Extended SQLAlchemy connection class that also includes access to the schema.
 """
-from typing import cast, Any, Mapping, Sequence, Union, Dict, Optional, Set, \
+from typing import cast, Any, Mapping, Sequence, Union, Dict, Optional, \
                    Awaitable, Callable, TypeVar
 import asyncio
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from .typing import SaFromClause
+from .typing import SaResult
 from .sql.sqlalchemy_schema import SearchTables
-from .sql.sqlalchemy_types import Geometry
 from .logging import log
 from .config import Configuration
 
@@ -38,7 +37,6 @@ class SearchConnection:
         self.t = tables
         self.config = config
         self._property_cache = properties
-        self._classtables: Optional[Set[str]] = None
         self.query_timeout: Optional[int] = None
 
     def set_query_timeout(self, timeout: Optional[int]) -> None:
@@ -56,7 +54,7 @@ class SearchConnection:
 
     async def execute(self, sql: 'sa.Executable',
                       params: Union[Mapping[str, Any], Sequence[Mapping[str, Any]], None] = None
-                      ) -> 'sa.Result[Any]':
+                      ) -> SaResult:
         """ Execute a 'execute()' query on the connection.
         """
         log().sql(self.connection, sql, params)
@@ -121,25 +119,3 @@ class SearchConnection:
         self._property_cache[full_name] = value
 
         return value
-
-    async def get_class_table(self, cls: str, typ: str) -> Optional[SaFromClause]:
-        """ Lookup up if there is a classtype table for the given category
-            and return a SQLAlchemy table for it, if it exists.
-        """
-        if self._classtables is None:
-            res = await self.execute(sa.text("""SELECT tablename FROM pg_tables
-                                                WHERE tablename LIKE 'place_classtype_%'
-                                             """))
-            self._classtables = {r[0] for r in res}
-
-        tablename = f"place_classtype_{cls}_{typ}"
-
-        if tablename not in self._classtables:
-            return None
-
-        if tablename in self.t.meta.tables:
-            return self.t.meta.tables[tablename]
-
-        return sa.Table(tablename, self.t.meta,
-                        sa.Column('place_id', sa.BigInteger),
-                        sa.Column('centroid', Geometry))

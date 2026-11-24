@@ -9,13 +9,17 @@ Feature: Tag evaluation
             n200 Tbuilding=yes,amenity=cafe
             n201 Tbuilding=yes,name=Intersting
             n202 Tbuilding=yes
+            n203 Tbuilding=yes,addr:housenumber=1
+            n204 Tbuilding=yes,landuse=retail,name=Two
             """
         Then place contains exactly
-            | object | class    | type     |
-            | N100   | highway  | bus_stop |
-            | N101   | junction | yes      |
-            | N200   | amenity  | cafe     |
-            | N201   | building | yes      |
+            | object | class    | type     | categories!set                             |
+            | N100   | highway  | bus_stop | 'osm.highway.bus_stop'                     |
+            | N101   | junction | yes      | 'osm.junction.yes'                         |
+            | N200   | amenity  | cafe     | 'osm.amenity.cafe'                         |
+            | N201   | building | yes      | 'osm.building.yes'                         |
+            | N203   | building | yes      | 'osm.building.yes'                         |
+            | N204   | building | yes      | 'osm.building.yes', 'osm.landuse.retail'   |
 
 
     Scenario: Name and reg tags
@@ -66,7 +70,17 @@ Feature: Tag evaluation
             | N4002  | place | 'streetnumber': '10', 'city': 'Rootoo' |
 
 
-    Scenario: Country codes
+    Scenario: addr:substreet is an alias for addr:place
+        When loading osm data
+            """
+            n41 Taddr:housenumber=34,addr:substreet=Bow%20%Terrace,addr:parentstreet=Main%20%Road
+            """
+        Then place contains exactly
+            | object | class | address!dict |
+            | N41    | place | 'housenumber': '34', 'place': 'Bow Terrace', 'parentstreet': 'Main Road' |
+
+
+     Scenario: Country codes
         When loading osm data
             """
             n5001 Tshop=yes,country_code=DE
@@ -129,24 +143,30 @@ Feature: Tag evaluation
             """
         Then place contains exactly
             | object | class   | type    | name!dict   | extratags!dict          | categories!set                               |
-            | N7001  | highway | primary | 'name': '1' | -                       | 'osm.highway.primary'                        |
-            | N7002  | bridge  | yes     | 'name': '1' | 'bridge:name': '1'      | 'osm.bridge.yes', 'osm.highway.primary'      |
+            | N7001  | highway | primary | 'name': '1' | 'bridge': 'yes'                | 'osm.highway.primary'                        |
+            | N7002  | bridge  | yes     | 'name': '1' | 'highway': 'primary', 'bridge:name': '1' | 'osm.bridge.yes', 'osm.highway.primary'      |
 
 
     Scenario: Categories are populated and merged for main tags
+        Given the grid
+            | 1 | 2 |
+            | 3 |   |
         When loading osm data
             """
+            n1
+            n2
+            n3
             n7101 Ttourism=hotel,amenity=restaurant,name=foo
             n7102 Tamenity=vending-machine
             n7103 Tamenity=foo/bar
-            n7104 Tboundary=administrative,place=city,name=A
+            w7104 Tboundary=administrative,place=city,name=A,admin_level=10 Nn1,n2,n3,n1
             """
         Then place contains exactly
             | object | categories!set                                   |
             | N7101  | 'osm.tourism.hotel', 'osm.amenity.restaurant'    |
             | N7102  | 'osm.amenity.vending_machine'                    |
             | N7103  | 'osm.amenity.yes'                                |
-            | N7104  | 'osm.boundary.administrative', 'osm.place.city'  |
+            | W7104  | 'osm.boundary.administrative', 'osm.place.city'  |
 
 
     Scenario: Global fallback and skipping
@@ -184,19 +204,23 @@ Feature: Tag evaluation
 
 
     Scenario: Administrative boundaries with place tags
+        Given the grid
+            | 1 | 2 |
+            | 3 |   |
         When loading osm data
             """
-            n10001 Tboundary=administrative,place=city,name=A
-            n10002 Tboundary=natural,place=city,name=B
-            n10003 Tboundary=administrative,place=island,name=C
+            n1
+            n2
+            n3
+            w10001 Tboundary=administrative,place=city,name=A,admin_level=10 Nn1,n2,n3,n1
+            w10002 Tboundary=natural,place=city,name=B Nn1,n2,n3,n1
+            w10003 Tboundary=administrative,place=island,name=C,admin_level=10 Nn1,n2,n3,n1
             """
         Then place contains
             | object | class    | type           | categories!set                                    |
-            | N10001 | boundary | administrative | 'osm.boundary.administrative', 'osm.place.city'   |
-        And place contains
-            | object | class    | type           | categories!set                                    |
-            | N10002 | boundary | natural        | 'osm.boundary.natural', 'osm.place.city'          |
-            | N10003 | boundary | administrative | 'osm.boundary.administrative', 'osm.place.island' |
+            | W10001 | boundary | administrative | 'osm.boundary.administrative', 'osm.place.city'   |
+            | W10002 | boundary | natural        | 'osm.boundary.natural', 'osm.place.city'          |
+            | W10003 | boundary | administrative | 'osm.boundary.administrative', 'osm.place.island' |
 
 
     Scenario: Building fallbacks
@@ -279,10 +303,10 @@ Feature: Tag evaluation
             n3 Taddr:housenumber=23
             """
         Then place contains exactly
-            | object | class    | type  | address!dict        | name!dict |
-            | N1     | place    | house | 'housenumber': '23' | -    |
-            | N2     | place    | house | 'housenumber': '23' | 'addr:housename': 'Foo' |
-            | N3     | place    | house | 'housenumber': '23' | -    |
+            | object | class | type  | address!dict        | name!dict               | categories |
+            | N1     | place | house | 'housenumber': '23' | -                       | -          |
+            | N2     | place | house | 'housenumber': '23' | 'addr:housename': 'Foo' | -          |
+            | N3     | place | house | 'housenumber': '23' | -                       | -          |
 
 
     Scenario: Waterway locks

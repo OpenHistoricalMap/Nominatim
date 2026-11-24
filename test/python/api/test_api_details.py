@@ -2,7 +2,7 @@
 #
 # This file is part of Nominatim. (https://nominatim.org)
 #
-# Copyright (C) 2025 by the Nominatim developer community.
+# Copyright (C) 2026 by the Nominatim developer community.
 # For a full list of authors see the git log.
 """
 Tests for details API call.
@@ -14,8 +14,9 @@ import pytest
 import nominatim_api as napi
 
 
-@pytest.mark.parametrize('idobj', (napi.PlaceID(332), napi.OsmID('W', 4),
-                                   napi.OsmID('W', 4, 'highway')))
+@pytest.mark.parametrize('idobj', [napi.PlaceID(332), napi.OsmID('W', 4),
+                                   napi.OsmID('W', 4, 'highway'),
+                                   napi.OsmID('W', 4, 'other')])
 def test_lookup_in_placex(apiobj, frontend, idobj):
     import_date = dt.datetime(2022, 12, 7, 14, 14, 46, 0)
     apiobj.add_placex(place_id=332, osm_type='W', osm_id=4,
@@ -70,6 +71,22 @@ def test_lookup_in_placex(apiobj, frontend, idobj):
     assert result.address_keywords is None
 
     assert result.geometry == {'type': 'ST_LineString'}
+
+
+def test_select_right_with_multiple_places(apiobj, frontend):
+    apiobj.add_placex(place_id=332, osm_type='W', osm_id=4,
+                      class_='highway', type='residential',
+                      admin_level=15,
+                      rank_search=27, rank_address=26)
+    apiobj.add_placex(place_id=333, osm_type='W', osm_id=4,
+                      class_='barrier', type='fence',
+                      admin_level=15,
+                      rank_search=27, rank_address=26)
+
+    api = frontend(apiobj, options={'details'})
+
+    assert api.details(napi.OsmID('W', 4, 'highway')).place_id == 332
+    assert api.details(napi.OsmID('W', 4, 'barrier')).place_id == 333
 
 
 def test_lookup_in_placex_minimal_info(apiobj, frontend):
@@ -159,7 +176,7 @@ def test_lookup_placex_with_address_details(apiobj, frontend):
                                 category=('highway', 'residential'),
                                 names={'name': 'Street'}, extratags={},
                                 admin_level=15, fromarea=True, isaddress=True,
-                                rank_address=26, distance=0.0,
+                                rank_address=27, distance=0.0,
                                 local_name='Street'),
                napi.AddressLine(place_id=1000, osm_object=('N', 3333),
                                 category=('place', 'suburb'),
@@ -332,6 +349,19 @@ def test_lookup_in_osmline_split_interpolation(apiobj, frontend):
         assert result.place_id == 1002
 
 
+def test_lookup_osmline_housenumber_not_shadowed_by_placex_class_fallback(apiobj, frontend):
+    apiobj.add_placex(place_id=332, osm_type='W', osm_id=9,
+                      class_='highway', type='residential')
+    apiobj.add_osmline(place_id=1000, osm_id=9,
+                       startnumber=2, endnumber=4, step=1)
+
+    api = frontend(apiobj, options={'details'})
+    result = api.details(napi.OsmID('W', 9, '3'))
+
+    assert result.place_id == 1000
+    assert result.source_table.name == 'OSMLINE'
+
+
 def test_lookup_osmline_with_address_details(apiobj, frontend):
     apiobj.add_osmline(place_id=9000, osm_id=9,
                        startnumber=2, endnumber=4, step=1,
@@ -361,7 +391,7 @@ def test_lookup_osmline_with_address_details(apiobj, frontend):
                                 category=('highway', 'residential'),
                                 names={'name': 'Street'}, extratags={},
                                 admin_level=15, fromarea=True, isaddress=True,
-                                rank_address=26, distance=0.0,
+                                rank_address=27, distance=0.0,
                                 local_name='Street'),
                napi.AddressLine(place_id=1000, osm_object=('N', 3333),
                                 category=('place', 'suburb'),
@@ -462,7 +492,7 @@ def test_lookup_tiger_with_address_details(apiobj, frontend):
                                 category=('highway', 'residential'),
                                 names={'name': 'Street'}, extratags={},
                                 admin_level=15, fromarea=True, isaddress=True,
-                                rank_address=26, distance=0.0,
+                                rank_address=27, distance=0.0,
                                 local_name='Street'),
                napi.AddressLine(place_id=1000, osm_object=('N', 3333),
                                 category=('place', 'suburb'),
@@ -608,7 +638,7 @@ def test_lookup_postcode_with_address_details(apiobj, frontend, lookup):
 
 @pytest.mark.parametrize('objid', [napi.PlaceID(1736),
                                    napi.OsmID('W', 55),
-                                   napi.OsmID('N', 55, 'amenity')])
+                                   napi.OsmID('N', 54)])
 def test_lookup_missing_object(apiobj, frontend, objid):
     apiobj.add_placex(place_id=1, osm_type='N', osm_id=55,
                       class_='place', type='suburb')

@@ -22,13 +22,14 @@ https://nominatim.openstreetmap.org/details?osmtype=[N|W|R]&osmid=<value>&class=
 
 `osmtype` and `osmid` are required parameters. The type is one of node (N), way (W)
 or relation (R). The id must be a number. The `class` parameter is optional and
-allows to distinguish between entries, when the corresponding OSM object has more
-than one main tag. For example, when a place is tagged with `tourism=hotel` and
-`amenity=restaurant`, there will be two place entries in Nominatim, one for a
-restaurant, one for a hotel. You need to specify `class=tourism` or `class=amentity`
-to get exactly the one you want. If there are multiple places in the database
-but the `class` parameter is left out, then one of the places will be chosen
-at random and displayed.
+mostly kept for backwards compatibility. In same rare cases, an OSM object
+may appear with more than one entry in the database. For example, a
+highway on a bridge might have distinct entries for the highway and the
+bridge because they have different names. The `class` parameter may be used
+to select a specific entry for the OSM object. It must then correspond to the
+'class' of that entry. If no matching entry can be found, Nominatim will
+fall back to returning any entry that matches the OSM object.
+
 
 ``` xml
 https://nominatim.openstreetmap.org/details?place_id=<value>
@@ -131,6 +132,16 @@ When set to 1, include the tagged entrances in the result.
 Preferred language order for showing search results. This may either be
 a simple comma-separated list of language codes or have the same format
 as the ["Accept-Language" HTTP header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language).
+
+
+### Other
+
+| Parameter | Value  | Default |
+|-----------| -----  | ------- |
+| debug     | 0 or 1 | 0       |
+
+Output special developer debug information instead of the normal result.
+See [Debug output](Output.md#debug-output) for details.
 
 
 ## Examples

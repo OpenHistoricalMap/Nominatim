@@ -73,8 +73,6 @@ class SqliteWriter:
         LOG.warning('Setting up tables')
         if 'search' not in self.options:
             self.dest.t.meta.remove(self.dest.t.search_name)
-        else:
-            await self.create_class_tables()
 
         await self.dest.connection.run_sync(self.dest.t.meta.create_all)
 
@@ -85,17 +83,6 @@ class SqliteWriter:
                     await self.dest.execute(sa.select(
                         sa.func.RecoverGeometryColumn(table.name, col.name, 4326,
                                                       col.type.subtype.upper(), 'XY')))
-
-    async def create_class_tables(self) -> None:
-        """ Set up the table that serve class/type-specific geometries.
-        """
-        sql = sa.text("""SELECT tablename FROM pg_tables
-                         WHERE tablename LIKE 'place_classtype_%'""")
-        for res in await self.src.execute(sql):
-            for db in (self.src, self.dest):
-                sa.Table(res[0], db.t.meta,
-                         sa.Column('place_id', sa.BigInteger),
-                         sa.Column('centroid', Geometry))
 
     async def create_word_table(self) -> None:
         """ Create the word table.
@@ -139,14 +126,6 @@ class SqliteWriter:
                         for r in partition]
                 await self.dest.execute(table.insert(), data)
 
-        # Set up a minimal copy of pg_tables used to look up the class tables later.
-        pg_tables = sa.Table('pg_tables', self.dest.t.meta,
-                             sa.Column('schemaname', sa.Text, default='public'),
-                             sa.Column('tablename', sa.Text))
-        await self.dest.connection.run_sync(pg_tables.create)
-        data = [{'tablename': t} for t in self.dest.t.meta.tables]
-        await self.dest.execute(pg_tables.insert().values(data))
-
     async def create_indexes(self) -> None:
         """ Add indexes necessary for the frontend.
         """
@@ -181,16 +160,14 @@ class SqliteWriter:
 
         if 'search' in self.options:
             await self.create_spatial_index('postcode', 'geometry')
+            await self.create_spatial_index('placex', 'centroid')
             await self.create_spatial_index('search_name', 'centroid')
             await self.create_index('search_name', 'place_id')
             await self.create_index('osmline', 'parent_place_id')
             await self.create_index('tiger', 'parent_place_id')
+            # Used by the qualifier restriction of the name searches.
+            await self.create_index('placex', 'class_', 'type')
             await self.create_search_index()
-
-            for t in self.dest.t.meta.tables:
-                if t.startswith('place_classtype_'):
-                    await self.dest.execute(sa.select(
-                      sa.func.CreateSpatialIndex(t, 'centroid')))
 
     async def create_spatial_index(self, table: str, column: str) -> None:
         """ Create a spatial index on the given table and column.
@@ -198,12 +175,13 @@ class SqliteWriter:
         await self.dest.execute(sa.select(
                   sa.func.CreateSpatialIndex(getattr(self.dest.t, table).name, column)))
 
-    async def create_index(self, table_name: str, column: str) -> None:
-        """ Create a simple index on the given table and column.
+    async def create_index(self, table_name: str, *columns: str) -> None:
+        """ Create a simple index on the given table and columns.
         """
         table = getattr(self.dest.t, table_name)
+        cols = [getattr(table.c, column) for column in columns]
         await self.dest.connection.run_sync(
-            sa.Index(f"idx_{table}_{column}", getattr(table.c, column)).create)
+            sa.Index(f"idx_{table}_{'_'.join(c.name for c in cols)}", *cols).create)
 
     async def create_search_index(self) -> None:
         """ Create the tables and indexes needed for word lookup.
