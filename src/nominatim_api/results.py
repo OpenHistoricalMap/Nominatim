@@ -21,7 +21,7 @@ import datetime as dt
 
 import sqlalchemy as sa
 
-from .typing import SaSelect, SaRow
+from .typing import SaSelect, SaRow, SaColumn
 from .sql.sqlalchemy_types import Geometry
 from .types import Point, Bbox, LookupDetails, EntranceDetails
 from .connection import SearchConnection
@@ -574,6 +574,48 @@ def _setup_address_details(result: BaseResultT) -> None:
                 fromarea=False, isaddress=True, rank_address=28, distance=0))
 
 
+# OHM: stand-ins for open-ended dates. No start_date means "always existed",
+# no end_date means "still exists". Both sit far outside any real OHM date.
+OHM_DATE_MIN = -1e6
+OHM_DATE_MAX = 1e6
+
+
+def _ohm_decimal_date(datestr: SaColumn, startend: str, default: float) -> SaColumn:
+    """ Turn an OHM date string into a decimal date.
+
+        Uses OpenHistoricalMap/DateFunctions-plpgsql, the same functions the
+        tiler calls, so both read dates the same way. Partial dates are padded
+        to the start or end of the period they name; unreadable ones fall back
+        to the default.
+    """
+    return sa.func.coalesce(
+        sa.func.public.isodatetodecimaldate(
+            sa.func.public.pad_date(sa.func.nullif(datestr, ''), startend), False),
+        default)
+
+
+def _ohm_overlap_span(start_decdate: SaColumn, end_decdate: SaColumn,
+                      other_start: SaColumn, other_end: SaColumn) -> SaColumn:
+    """ Years the place existed within `other_start`..`other_end`.
+        Negative when the periods do not overlap, zero when they only touch.
+        Undated places count as always existing.
+    """
+    return sa.func.least(sa.func.coalesce(end_decdate, OHM_DATE_MAX), other_end,
+                         type_=sa.Float) \
+        - sa.func.greatest(sa.func.coalesce(start_decdate, OHM_DATE_MIN), other_start,
+                           type_=sa.Float)
+
+
+async def has_dates(conn: SearchConnection) -> bool:
+    """ Check if the database was imported with dates. The setting is read
+        from the database, so an old database never uses dates.
+    """
+    try:
+        return await conn.get_property('use_dates') == 'yes'
+    except ValueError:
+        return False
+
+
 async def complete_address_details(conn: SearchConnection, results: List[BaseResultT]) -> None:
     """ Retrieve information about places that make up the address of the result.
     """
@@ -585,7 +627,9 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
     lookup_ids = [{'pid': r.place_id,
                    'lid': _get_address_lookup_id(r),
                    'names': list(r.address.values()) if r.address else [],
-                   'c': ('SRID=4326;' + r.centroid.to_wkt()) if r.centroid else ''}
+                   'c': ('SRID=4326;' + r.centroid.to_wkt()) if r.centroid else '',
+                   'sd': (r.extratags or {}).get('start_date'),
+                   'ed': (r.extratags or {}).get('end_date')}
                   for r in results if r.place_id]
 
     if not lookup_ids:
@@ -596,6 +640,8 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
 
     t = conn.t.placex
     taddr = conn.t.addressline
+
+    use_dates = await has_dates(conn)
 
     sql = sa.select(ltab.c.value['pid'].as_integer().label('src_place_id'),
                     t.c.place_id, t.c.osm_type, t.c.osm_id, t.c.name,
@@ -609,17 +655,47 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             .join(t, taddr.c.address_place_id == t.c.place_id)\
             .order_by('src_place_id')\
             .order_by(sa.column('rank_address').desc())\
-            .order_by((taddr.c.place_id == ltab.c.value['pid'].as_integer()).desc())\
-            .order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
-                              (taddr.c.isaddress, 0),
-                              (sa.and_(taddr.c.fromarea,
-                                       t.c.geometry.ST_Contains(
-                                           sa.func.ST_GeomFromEWKT(
-                                               ltab.c.value['c'].as_string()))), 1),
-                              else_=-1).desc())\
-            .order_by(taddr.c.fromarea.desc())\
-            .order_by(taddr.c.distance.desc())\
-            .order_by(t.c.rank_search.desc())
+            .order_by((taddr.c.place_id == ltab.c.value['pid'].as_integer()).desc())
+
+    if use_dates:
+        # Dates of the searched place
+        result_start = _ohm_decimal_date(ltab.c.value['sd'].as_string(), 'start', OHM_DATE_MIN)
+        result_end = _ohm_decimal_date(ltab.c.value['ed'].as_string(), 'end', OHM_DATE_MAX)
+        overlap_span = _ohm_overlap_span(t.c.start_decdate, t.c.end_decdate,
+                                         result_start, result_end)
+        sql = sql.add_columns(overlap_span.label('ohm_overlap_span'))\
+                 .order_by((overlap_span >= 0).desc())
+
+    contains_centroid = sa.and_(taddr.c.fromarea,
+                                t.c.geometry.ST_Contains(
+                                    sa.func.ST_GeomFromEWKT(ltab.c.value['c'].as_string())))
+
+    if use_dates:
+        # isaddress is set during import, and which row gets it depends on
+        # the indexing order. For areas, only use the geometry so that every
+        # import gives the same address. Non-area parents still need it.
+        sql = sql.order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
+                                   (contains_centroid, 1),
+                                   (sa.and_(taddr.c.isaddress,
+                                            sa.not_(taddr.c.fromarea)), 1),
+                                   else_=-1).desc())
+    else:
+        sql = sql.order_by(sa.case((sa.func.CrosscheckNames(t.c.name, ltab.c.value['names']), 2),
+                                   (taddr.c.isaddress, 0),
+                                   (contains_centroid, 1),
+                                   else_=-1).desc())
+
+    sql = sql.order_by(taddr.c.fromarea.desc())
+
+    if use_dates:
+        sql = sql.order_by(sa.column('ohm_overlap_span').desc())
+
+    sql = sql.order_by(taddr.c.distance.desc())\
+             .order_by(t.c.rank_search.desc())
+
+    if use_dates:
+        # Fixed order for parents that tie on everything else.
+        sql = sql.order_by(t.c.osm_type, t.c.osm_id)
 
     current_result = None
     current_rank_address = -1
@@ -629,7 +705,11 @@ async def complete_address_details(conn: SearchConnection, results: List[BaseRes
             assert current_result is not None
             current_rank_address = -1
 
-        location_isaddress = row.rank_address != current_rank_address
+        # With dates, rows are sorted so the first row of a rank is the parent
+        # with the longest overlap in time. Skip the rank when even that one
+        # never overlapped the result.
+        location_isaddress = row.rank_address != current_rank_address \
+            and (not use_dates or row.ohm_overlap_span >= 0)
 
         if current_result.country_code is None and row.country_code:
             current_result.country_code = row.country_code
