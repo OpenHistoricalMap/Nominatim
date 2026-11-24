@@ -26,6 +26,10 @@ CREATE TABLE placex (
   housenumber TEXT,
   postcode TEXT,
   centroid GEOMETRY(Geometry, 4326) NOT NULL
+{% if config.get_bool('USE_DATES') %}
+  , start_decdate DOUBLE PRECISION
+  , end_decdate DOUBLE PRECISION
+{% endif %}
   ) {{db.tablespace.search_data}};
 
 CREATE UNIQUE INDEX idx_place_id ON placex USING BTREE (place_id) {{db.tablespace.search_index}};

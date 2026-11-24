@@ -14,6 +14,12 @@ CREATE TRIGGER osmline_before_insert BEFORE INSERT ON location_property_osmline
 -- update insert creates the location tables
 CREATE TRIGGER placex_before_update BEFORE UPDATE ON placex
     FOR EACH ROW EXECUTE PROCEDURE placex_update();
+
+{% if db.use_dates %}
+-- Must sort after placex_before_insert/update, which may rewrite extratags.
+CREATE TRIGGER placex_ohm_decdates BEFORE INSERT OR UPDATE ON placex
+    FOR EACH ROW EXECUTE PROCEDURE ohm_set_decdates();
+{% endif %}
 CREATE TRIGGER osmline_before_update BEFORE UPDATE ON location_property_osmline
     FOR EACH ROW EXECUTE PROCEDURE osmline_update();
 

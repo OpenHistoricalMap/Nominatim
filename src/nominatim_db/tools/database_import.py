@@ -24,6 +24,7 @@ from ..db.connection import connect, get_pg_env, Connection, server_version_tupl
                             postgis_version_tuple, drop_tables, table_exists, execute_scalar
 from ..db.sql_preprocessor import SQLPreprocessor
 from ..db.query_pool import QueryPool
+from ..db import properties
 from .exec_utils import run_osm2pgsql
 from ..version import POSTGRESQL_REQUIRED_VERSION, POSTGIS_REQUIRED_VERSION
 
@@ -155,6 +156,8 @@ def create_tables(conn: Connection, config: Configuration, reverse_only: bool = 
     """
     SQLPreprocessor(conn, config).run_sql_file(conn, 'tables.sql',
                                                create_reverse_only=reverse_only)
+    properties.set_property(conn, 'use_dates',
+                            'yes' if config.get_bool('USE_DATES') else 'no')
 
     # reinitiate the preprocessor to get all the newly created tables
     SQLPreprocessor(conn, config).run_sql_file(conn, 'grants.sql')

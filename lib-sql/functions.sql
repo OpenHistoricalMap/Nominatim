@@ -25,3 +25,9 @@
 
 {% include('functions/partition-functions.sql') %}
 {% include('functions/associated_street_triggers.sql') %}
+{% if db.use_dates %}
+-- ohm_dates.sql calls pad_date() and isodatetodecimaldate() from
+-- https://github.com/OpenHistoricalMap/DateFunctions-plpgsql
+-- They must be loaded before this file.
+{% include('functions/ohm_dates.sql') %}
+{% endif %}

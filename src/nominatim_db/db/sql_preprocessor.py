@@ -13,6 +13,7 @@ import re
 import jinja2
 
 from .connection import Connection
+from .properties import get_property
 from ..config import Configuration
 from ..db.query_pool import QueryPool
 
@@ -96,6 +97,8 @@ class SQLPreprocessor:
         db_info['reverse_only'] = 'search_name' not in db_info['tables']
         db_info['tablespace'] = _setup_tablespace_sql(config)
         db_info['middle_db_format'] = _get_middle_db_format(conn, db_info['tables'])
+        # Set once at import. Databases without the property never use dates.
+        db_info['use_dates'] = get_property(conn, 'use_dates') == 'yes'
 
         self.env.globals['config'] = config
         self.env.globals['db'] = db_info
